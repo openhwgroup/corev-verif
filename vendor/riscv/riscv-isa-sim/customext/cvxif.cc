@@ -48,33 +48,61 @@ class cvxif_t : public cvxif_extn_t
     // INSN_R personality serves to simplify access to standard encoding fields.
     cvxif_r_insn_t insn_r = copro_insn.r_type;
 
-   if (insn_r.opcode != 0x7b /* MATCH_CUSTOM3 */)
+    if ((insn_r.opcode & 0x3) != (unsigned) Cop::NOT_COMPRESSED) {
+      // Instruction is compressed.  Only CUS_CADD writes back something.
+      if (copro_insn.cr_type.opcode == Cop::C0) {
+        // Compressed insns with opcode C0 (2'b10) used in CV-X-IF:
+        // - CUS_CNOP: no WB
+        // - CUS_CADD: writes back into x10.
+        if (copro_insn.cr_type.funct4 == Func4::FUNC4_CADD)
+          return true;
+        else
+          // All others
+          return false;
+      }
+    } else if (insn_r.opcode == 0x7b /* MATCH_CUSTOM3 */) {
+      switch (insn_r.funct3) {
+        case Func3::FUNC3_0:
+          //CUS_NOP have rd equal to zero
+          return (insn_r.rd != 0x0);
+        case Func3::FUNC3_1:
+          switch (insn_r.funct7) {
+            case Func7::CUS_ADD:
+              return true;
+            case Func7::CUS_DOUBLE_RS1:
+              return true;
+            case Func7::CUS_DOUBLE_RS2:
+             return true;
+            case Func7::CUS_ADD_MULTI:
+              return true;
+            default:
+              return false;
+          }
+        default:
+          // All other values of Func3
+          return false;
+      }
+    } else if (insn_r.funct3 == 0x0
+               && (insn_r.funct7 & 0x3) == 0x0) {
+      // Potential CVXIF opcodes
+#if 1
+      switch (insn_r.opcode) {
+        case CustomOpcode::CUS_ADD_RS3_MADDRTYPE:
+        case CustomOpcode::CUS_ADD_RS3_MSUB:
+        case CustomOpcode::CUS_ADD_RS3_NMADD:
+        case CustomOpcode::CUS_ADD_RS3_NMSUB:
+          return true;
+        default:
+          return false;
+      }
+#endif
       return false;
-    else switch (insn_r.funct3)
-    {
-      case Func3::FUNC3_0:
-        //CUS_NOP have rd equal to zero
-        return (insn_r.rd != 0x0);
-      case Func3::FUNC3_1:
-        switch (insn_r.funct7)
-        {
-          case Func7::CUS_ADD:
-            return true;
-          case Func7::CUS_DOUBLE_RS1:
-            return true;
-          case Func7::CUS_DOUBLE_RS2:
-            return true;
-          case Func7::CUS_ADD_MULTICYCLE:
-            return true;
-          default:
-            return false;
-        }
-      case Func3::FUNC3_2:
-      case Func3::FUNC3_3:
-        return false;
-      default:
-        return false;
-    }
+    } else if (insn_r.opcode == CustomOpcode::CUS_ADD_RS3_MADDRTYPE
+               && insn_r.funct3 == 0x1
+               && insn_r.funct7 == Func7::CUS_ADD_RS3_RTYPE)
+      return true;
+    else
+      return false;
   }
 
   // Custom0 instructions: default behaviour.
@@ -125,7 +153,7 @@ class cvxif_t : public cvxif_extn_t
             return (reg_t) ((reg_t) RS1 + (reg_t) RS1);
           case Func7::CUS_DOUBLE_RS2:
             return (reg_t) ((reg_t) RS2 + (reg_t) RS2);
-          case Func7::CUS_ADD_MULTICYCLE:
+          case Func7::CUS_ADD_MULTI:
             return (reg_t) ((reg_t) RS1 + (reg_t) RS2);
           default:
             illegal_instruction();
@@ -138,6 +166,13 @@ class cvxif_t : public cvxif_extn_t
     return (reg_t) -1;
   }
 
+  // CUS_ADD_RS3_MADD: Custom Add with RS3 opcode == MADD.
+  reg_t cus_add_rs3_madd(cvxif_insn_t insn)
+  {
+    return 
+  }
+
+  // 32-bit insns 
   cvxif_t()
   {
   }
