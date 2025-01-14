@@ -19,7 +19,7 @@
 // is 'custom##n': illegal instruction, return 0.
 // The writeback controller 'cvxif_extn_t::do_writeback_p'
 // is in charge of determining if writeback is required or not.
-// Expected instruction encoding is 4 bytes.
+// After executing the instruction the PC is avanced by 4 bytes.
 #define customX(n) \
 static reg_t c##n(processor_t* p, insn_t insn, reg_t pc) \
   { \
@@ -35,6 +35,78 @@ static reg_t c##n(processor_t* p, insn_t insn, reg_t pc) \
   reg_t default_custom##n(cvxif_insn_t insn) \
   { \
     return custom##n(insn); \
+  }
+
+// Define 32-bit insn template with explicit RD.
+// The insn-level wrapper is 'cvxif_32_##<name>',
+// the default implementation is 'default_cvxif_32_##<name>'
+// and the register semantics is expected in function 'compute_cvxif_32_##<name>'.
+// After executing the instruction the PC is advanced by 4 bytes.
+#define cvxif_insn_32(name) \
+  static reg_t cvxif_32_##name(processor_t* p, insn_t insn, reg_t pc) { \
+    cvxif_t* cvxif = static_cast<cvxif_t*>(p->get_extension(EXTENSION_NAME)); \
+    cvxif_insn_t custom_insn; \
+    custom_insn.i = insn; \
+    reg_t xd = cvxif->default_cvxif_32_##name(custom_insn); \
+    if (cvxif->do_writeback_p(custom_insn)) \
+      WRITE_RD(xd); \
+    return pc+4; \
+  } \
+  \
+  reg_t default_cvxif_32_##name(cvxif_insn_t insn) { \
+    return cvxif_##name(insn); \
+  }
+
+// Define 32-bit insn template with implicit RD == a0.
+// Like 'cvxif_insn_32' but the destination register is hardcoded.
+// After executing the instruction the PC is advanced by 4 bytes.
+#define cvxif_insn_32_rd_implicit_a0(name) \
+  static reg_t cvxif_32_##name(processor_t* p, insn_t insn, reg_t pc) { \
+    cvxif_t* cvxif = static_cast<cvxif_t*>(p->get_extension(EXTENSION_NAME)); \
+    cvxif_insn_t custom_insn; \
+    custom_insn.i = insn; \
+    reg_t xd = cvxif->default_cvxif_32_##name(custom_insn); \
+    if (cvxif->do_writeback_p(custom_insn)) \
+      WRITE_REG(10, xd); \
+    return pc+4; \
+  } \
+  \
+  reg_t default_cvxif_32_##name(cvxif_insn_t insn) { \
+    return cvxif_##name(insn); \
+  }
+
+// Like the 32-bit explicit RD version 'cvxif_insn_32', but uses 16-bit
+// opcodes. PC is advanced by 16 bits instead of 32.
+#define cvxif_insn_16(name) \
+  static reg_t cvxif_16_##name(processor_t* p, insn_t insn, reg_t pc) { \
+    cvxif_t* cvxif = static_cast<cvxif_t*>(p->get_extension(EXTENSION_NAME)); \
+    cvxif_insn_t custom_insn; \
+    custom_insn.i = insn; \
+    reg_t xd = cvxif->default_cvxif_16_##name(custom_insn); \
+    if (cvxif->do_writeback_p(custom_insn)) \
+      WRITE_RD(xd); \
+    return pc+2 ; \
+  } \
+  \
+  reg_t default_cvxif_16_##name(cvxif_insn_t insn) { \
+    return cvxif_##name(insn); \
+  }
+
+// Like 'cvxif_insn_16', but RD is implicitly x10 (a0).
+// PC is advanced by 16 bits.
+#define cvxif_insn_16_rd_implicit_a0(name) \
+  static reg_t cvxif_16_##name(processor_t* p, insn_t insn, reg_t pc) { \
+    cvxif_t* cvxif = static_cast<cvxif_t*>(p->get_extension(EXTENSION_NAME)); \
+    cvxif_insn_t custom_insn; \
+    custom_insn.i = insn; \
+    reg_t xd = cvxif->default_cvxif_16_##name(custom_insn); \
+    if (cvxif->do_writeback_p(custom_insn)) \
+      WRITE_REG(10, xd); \
+    return pc+2 ; \
+  } \
+  \
+  reg_t default_cvxif_16_##name(cvxif_insn_t insn) { \
+    return cvxif_##name(insn); \
   }
 
 // This class instantiates the CV-X-IF interface.
@@ -164,15 +236,75 @@ class cvxif_t : public cvxif_extn_t
 
     // FORNOW: Return 0xf......f to simplify debugging.
     return (reg_t) -1;
-  }
-
-  // CUS_ADD_RS3_MADD: Custom Add with RS3 opcode == MADD.
-  reg_t cus_add_rs3_madd(cvxif_insn_t insn)
-  {
-    return 
-  }
+  };
 
   // 32-bit insns 
+  #define CVXIF_CUS_ADD_RS3_ADDSUB_MASK 0x0600707f
+  #define CVXIF_CUS_ADD_RS3_MADD_MATCH  0x00000043
+  #define CVXIF_CUS_ADD_RS3_MSUB_MATCH  0x00000047
+  #define CVXIF_CUS_ADD_RS3_NMADD_MATCH 0x0000004f
+  #define CVXIF_CUS_ADD_RS3_NMSUB_MATCH 0x0000004b
+
+  #define CVXIF_CUS_ADD_RS3_RTYPE_MASK  0x0600707f
+  #define CVXIF_CUS_ADD_RS3_RTYPE_MATCH 0x08001043
+
+  // Semantics of CUS_ADD_RS3_MADD: Custom Add with RS3, opcode == MADD.
+  reg_t cvxif_cus_add_rs3_madd(cvxif_insn_t cvxif_insn)
+  {
+    insn_t insn = cvxif_insn.i;
+    return (reg_t) ((reg_t) RS1 + (reg_t) RS2 + (reg_t) RS3);
+  };
+
+  // Semantics of CUS_ADD_RS3_MSUB: Custom Add with RS3, opcode == MSUB.
+  reg_t cvxif_cus_add_rs3_msub(cvxif_insn_t cvxif_insn)
+  {
+    insn_t insn = cvxif_insn.i;
+    return (reg_t) ((reg_t) RS1 + (reg_t) RS2 + (reg_t) RS3);
+  };
+
+  // Semantics of CUS_ADD_RS3_NMADD: Custom Add with RS3, opcode == NMADD.
+  reg_t cvxif_cus_add_rs3_nmadd(cvxif_insn_t cvxif_insn)
+  {
+    insn_t insn = cvxif_insn.i;
+    return (reg_t) ((reg_t) RS1 + (reg_t) RS2 + (reg_t) RS3);
+  };
+
+  // Semantics of CUS_ADD_RS3_NMSUB: Custom Add with RS3, opcode == NMSUB.
+  reg_t cvxif_cus_add_rs3_nmsub(cvxif_insn_t cvxif_insn)
+  {
+    insn_t insn = cvxif_insn.i;
+    return (reg_t) ((reg_t) RS1 + (reg_t) RS2 + (reg_t) RS3);
+  };
+
+  // Semantics of CUS_ADD_RS3_RTYPE: Custom Add with RS3, opcode == RTYPE (rd is implicitly a0).
+  reg_t cvxif_cus_add_rs3_rtype(cvxif_insn_t cvxif_insn)
+  {
+    insn_t insn = cvxif_insn.i;
+    return (reg_t) ((reg_t) RS1 + (reg_t) RS2 + (reg_t) RS3);
+  };
+
+  // Compressed (16-bit) insns
+  #define CVXIF_CUS_CNOP_MASK  0xfffff003
+  #define CVXIF_CUS_CNOP_MATCH 0x0000e000
+  #define CVXIF_CUS_CADD_MASK  0xfffff003
+  #define CVXIF_CUS_CADD_MATCH 0xffffe003
+
+  // Semantics of CUS_CNOP: Compressed CV-X-IF NOP.
+  reg_t cvxif_cus_cnop(cvxif_insn_t cvxif_insn)
+  {
+    insn_t insn = cvxif_insn.i;
+    // Value will be ignored by writeback checker.
+    return (reg_t) -1;
+  };
+
+  // Semantics of CUS_CADD: Compressed CV-X-IF ADD.
+  reg_t cvxif_cus_cadd(cvxif_insn_t cvxif_insn)
+  {
+    return (reg_t) ((reg_t) READ_REG(cvxif_insn.cr_type.rd_rs1) + (reg_t) READ_REG(cvxif_insn.cr_type.rs2));
+  }
+
+  // Extension constructor
+  //TODO FIXME: May need checking of active ISA extensions since CV-X-IF extension conflicts with 'F' opcodes,
   cvxif_t()
   {
   }
@@ -233,16 +365,44 @@ class cvxif_t : public cvxif_extn_t
   customX(2)
   customX(3)
 
+  // CV-X-IF non-custom3 32-bit insns
+  cvxif_insn_32(cus_add_rs3_madd)
+  cvxif_insn_32(cus_add_rs3_msub)
+  cvxif_insn_32(cus_add_rs3_nmadd)
+  cvxif_insn_32(cus_add_rs3_nmsub)
+  cvxif_insn_32_rd_implicit_a0(cus_add_rs3_rtype)                           
+
+  // CV-X-IF non-custom 16-bit insns
+  cvxif_insn_16(cus_cnop)
+  cvxif_insn_16_rd_implicit_a0(cus_cadd)
+
   // Set instruction handlers for customN opcode patterns.
   // NOTE: This method may need revisiting if multiple custom extensions are to be loaded
   //       simultaneously in the future.
   std::vector<insn_desc_t> get_instructions()
   {
+
+// Factor out tedious, repetitive code as all combinations of RV32/RV64 x RVI/RVE x fast/logged simulation path
+// use the same implementation of functions.  Leave a differentiating 'default' value at the 
+#define ADD_INSN_TO_DECODER(match,mask,impl, dflt) \
+    insns.push_back((insn_desc_t){(match), (mask), &(impl), &(impl), &(impl), &(impl), &(impl), &(impl), &(impl), &(dflt)})
+
     std::vector<insn_desc_t> insns;
-    insns.push_back((insn_desc_t){0x0b, 0x7f, &::illegal_instruction, &::illegal_instruction, &::illegal_instruction, &::illegal_instruction, &::illegal_instruction, &::illegal_instruction, &::illegal_instruction, c0});
-    insns.push_back((insn_desc_t){0x2b, 0x7f, &::illegal_instruction, &::illegal_instruction, &::illegal_instruction, &::illegal_instruction, &::illegal_instruction, &::illegal_instruction, &::illegal_instruction, c1});
-    insns.push_back((insn_desc_t){0x5b, 0x7f, &::illegal_instruction, &::illegal_instruction, &::illegal_instruction, &::illegal_instruction, &::illegal_instruction, &::illegal_instruction, &::illegal_instruction, c2});
-    insns.push_back((insn_desc_t){0x7b, 0x7f, &c3, &c3, &c3, &c3, &c3, &c3, &c3, c3});
+    ADD_INSN_TO_DECODER(0x0b, 0x7f, ::illegal_instruction, c0);    
+    ADD_INSN_TO_DECODER(0x2b, 0x7f, ::illegal_instruction, c1);
+    ADD_INSN_TO_DECODER(0x5b, 0x7f, ::illegal_instruction, c2);
+    ADD_INSN_TO_DECODER(0x7b, 0x7f, c3,                    c3);
+
+    // Instructions ADD_RS3_*
+    ADD_INSN_TO_DECODER(CVXIF_CUS_ADD_RS3_MADD_MATCH,  CVXIF_CUS_ADD_RS3_ADDSUB_MASK, cvxif_32_cus_add_rs3_madd,  cvxif_32_cus_add_rs3_madd);
+    ADD_INSN_TO_DECODER(CVXIF_CUS_ADD_RS3_MSUB_MATCH,  CVXIF_CUS_ADD_RS3_ADDSUB_MASK, cvxif_32_cus_add_rs3_msub,  cvxif_32_cus_add_rs3_msub);
+    ADD_INSN_TO_DECODER(CVXIF_CUS_ADD_RS3_NMADD_MATCH, CVXIF_CUS_ADD_RS3_ADDSUB_MASK, cvxif_32_cus_add_rs3_nmadd, cvxif_32_cus_add_rs3_nmadd);
+    ADD_INSN_TO_DECODER(CVXIF_CUS_ADD_RS3_NMSUB_MATCH, CVXIF_CUS_ADD_RS3_ADDSUB_MASK, cvxif_32_cus_add_rs3_nmsub, cvxif_32_cus_add_rs3_nmsub);
+    ADD_INSN_TO_DECODER(CVXIF_CUS_ADD_RS3_RTYPE_MATCH, CVXIF_CUS_ADD_RS3_RTYPE_MASK,  cvxif_32_cus_add_rs3_rtype, cvxif_32_cus_add_rs3_rtype);
+
+    // Compressed insns CNOP/CADD.
+    ADD_INSN_TO_DECODER(CVXIF_CUS_CNOP_MATCH,          CVXIF_CUS_CNOP_MASK,           cvxif_16_cus_cnop,           cvxif_16_cus_cnop);
+    ADD_INSN_TO_DECODER(CVXIF_CUS_CNOP_MATCH,          CVXIF_CUS_CNOP_MASK,           cvxif_16_cus_cadd,           cvxif_16_cus_cadd);
     return insns;
   }
 
