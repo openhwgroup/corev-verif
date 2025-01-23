@@ -296,8 +296,9 @@ Processor::Processor(
   for (auto ext : registered_extensions_v) {
     if (ext.second) {
       extension_t *extension = find_extension(ext.first.c_str())();
+      extension->set_Proc(this);
+      // 'register_extension' internally calls 'reset()' on the extension.
       this->register_extension(extension);
-      extension->reset();
     }
   }
 
@@ -569,7 +570,7 @@ void Processor::reset()
     uint64_t pmpregions_writable = this->params[base + "pmpregions_writable"].a_uint64_t;
     uint64_t pmpregions_max = this->params[base + "pmpregions_max"].a_uint64_t;
 
-    for (int i = pmpregions_writable; i < pmpregions_max; i++) {
+    for (uint64_t i = pmpregions_writable; i < pmpregions_max; i++) {
         uint64_t csr_pmpaddr = CSR_PMPADDR0 + i;
         uint64_t csr_pmpcfg = CSR_PMPCFG0 + (i/4);
 
